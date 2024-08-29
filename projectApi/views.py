@@ -59,8 +59,7 @@ def getResponse(text):
 def processChat(request): # main function for chat endpoint
     '''
     output:
-    if category is document_creation then message will be "success" and doc_array will be a list of json's of format [{'id' : id ,'path' : doc_file_url},.....]
-    if category is conversation then message will be response to the conversation and doc_array field will be None
+    {message : [{'id':document_id, 'path': document_path}......]
     '''
     try:
         if request.method == 'GET':
