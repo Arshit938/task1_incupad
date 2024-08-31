@@ -78,7 +78,7 @@ def processChat(request): # main function for chat endpoint
             resp=getResponse(text=query)
         return JsonResponse({'message':resp})
     except Exception as e:
-        return JsonResponse({'message':f'Error : {e}','doc_array':[],'category':'Error'})
+        return JsonResponse({'message':f'Error : {e}'})
 # api2 submitbutton
     
 def extractData(file_path):
