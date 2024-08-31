@@ -33,20 +33,23 @@ def categorizeText(text):
     text=text.lower()
     create_document_patterns = [
         r'\bcreate\b.*\bdocument\b',  
+        r'\bcreate\b.*\b(doc|pdf)\b',  
         r'\bwrite\b.*\bdocument\b',   
+        r'\bwrite\b.*\b(doc|pdf)\b',   
         r'\bgenerate\b.*\bdocument\b',
-        r'\bnew\b.*\bdocument\b',     
-        r'\bstart\b.*\b(report|file|document)\b',  
-        r'\bdraft\b.*\b(letter|document)\b',  
+        r'\bgenerate\b.*\b(doc|pdf)\b',
+        r'\bnew\b.*\b(document|doc|pdf)\b',     
+        r'\bstart\b.*\b(report|file|document|doc|pdf)\b',  
+        r'\bdraft\b.*\b(letter|document|doc|pdf)\b',  
         r'\bbuild\b.*\breport\b',  
         r'\bcreate\b.*\bfile\b',   
-        r'\bcompose\b.*\bdocument\b',  
+        r'\bcompose\b.*\b(document|doc|pdf)\b',  
         r'\bopen\b.*\btemplate\b',  
         r'\bcreate\b.*\baffidavit\b',  
         r'\bprepare\b.*\baffidavit\b', 
         r'\bdraft\b.*\baffidavit\b',   
         r'\baffidavit\b.*\bform\b',
-        r'\bfill\b.*\b(report|file|document|form)\b',    
+        r'\bfill\b.*\b(report|file|document|form|pdf)\b',    
     ]
 
     ans=any(re.search(pattern, text) for pattern in create_document_patterns)
