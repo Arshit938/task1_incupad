@@ -13,6 +13,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import units
 from reportlab.lib.utils import simpleSplit
+import fpdf as FPDF
 
 
 # setting up llms secret key as os enviornment variable
@@ -44,7 +45,8 @@ def categorizeText(text):
         r'\bcreate\b.*\baffidavit\b',  
         r'\bprepare\b.*\baffidavit\b', 
         r'\bdraft\b.*\baffidavit\b',   
-        r'\baffidavit\b.*\bform\b',    
+        r'\baffidavit\b.*\bform\b',
+        r'\bfill\b.*\b(report|file|document|form)\b',    
     ]
 
     ans=any(re.search(pattern, text) for pattern in create_document_patterns)
@@ -106,7 +108,7 @@ def extractFields(text):
     output format: [label1, label2.....]
     '''
     prompt_template="""
-    you are a text analyser and you are given a text which is an affidavit form and you have to find out all the fields that are to be filled in that form in output only give the field names separated by comma below is the form in text format
+    you are a text analyser and you are given a text which is an affidavit form and you have to find out all the fields that have spaces to be filled in that form in output give field names in comma seperated list
     {text_form}
     """
     llm=get_llm()
@@ -157,12 +159,21 @@ def fillData(doc_id,data):
     llm=get_llm()
     obj=docTable.objects.get(id=doc_id)
     text_form=extractData(obj.doc_file.url)
-    pp2="""
+    pp2 = """
     {user_input}
-    use the above information to fill all the fields of form given below
+    Using the above information, carefully fill in all the fields of the form provided below. 
+    Ensure that the output retains the **exact line structure and formatting** as shown in the form template. 
+    Do **not** change the alignment, spacing, or line breaks in the text. 
+
+    Replace the placeholders with the appropriate information provided. 
+    Replace '(Insert Statement)' with the user's statement. Leave the signature and date sections intact.
+
+    Here is the form template to fill:
+
     {text_form}
-    output sting should only contain filled form and also replace the (Insert Statement) with the statement provided and leave the signature section as it is in the information preserve structure of form
-    """
+
+    The filled form should be in the **same format** as above. The output should only contain the filled form with the **same line and paragraph breaks** as in the original.
+"""
     prompt2=PromptTemplate(
         input_variables=['user_input','text_form'],
         template=pp2,
@@ -173,32 +184,56 @@ def fillData(doc_id,data):
 
 
 
-def create_pdf(text, filename):
-    page_width, page_height = A4
-    left_margin = right_margin = 1 * units.inch  # 1 inch margins
-    top_margin = bottom_margin = 1 * units.inch
+def align_text_to_pdf(text,output_pdf,line_length=80):
+    # Initialize PDF object
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    
+    border_thickness = 0.75  # 0.75 corresponds to approximately 3-4 px
+    pdf.set_line_width(border_thickness)
+    pdf.rect(10, 10, pdf.w - 20, pdf.h - 20)
 
-    usable_width = page_width - left_margin - right_margin
-    usable_height = page_height - top_margin - bottom_margin
+    pdf.set_font("Arial", "B", size=22)  # Bold font for heading
+    pdf.cell(0, 20, "GENERAL AFFIDAVIT", ln=True, align="C")  # ln=True moves the cursor to next line after cell
+    pdf.set_font("Arial", size=12)
 
-    c = canvas.Canvas(filename, pagesize=A4)
-    c.setFont("Times-Roman", 12)
+    output_str = ""
+    lines = text.split('\n')
+    line = ''
+    # aligning text
+    for i in lines:
+        i=i.strip()
+        if len(i) == 0:  
+            if len(line) != 0:
+                pdf.multi_cell(0, 10, line)  
+                line = ''
+            pdf.ln(10)  
+            continue
 
-    lines = simpleSplit(text, "Times-Roman", 12, usable_width)
+        words = i.split(' ')
+        if len(i) <= line_length // 2:  
+            if len(line) != 0:
+                pdf.multi_cell(0, 10, line)
+                line = ''
+                pdf.ln(10)  
+            pdf.multi_cell(0, 10, i)
+            continue
 
-    y_position = page_height - top_margin
+        for j in words:
+            temp = line + j + ' '
+            if len(temp) < line_length:
+                line = temp
+            else:
+                pdf.multi_cell(0, 10, line) 
+                line = j + ' '  
 
-
-    for line in lines:
-        if y_position <= bottom_margin:
-            c.showPage()  # Start a new page
-            c.setFont("Times-Roman", 12)
-            y_position = page_height - top_margin  # Reset y position for new page
-
-        # Draw text on the canvas
-        c.drawString(left_margin, y_position, line)
-        y_position -= 14  
-    c.save()
+    # If any text is left in the line, add it to the PDF
+    if line:
+        pdf.multi_cell(0, 10, line)
+    # Save the PDF to the specified file
+    pdf.output(output_pdf)
+    print(f"PDF saved as {output_pdf}")
 
 
 def submitForm(request): #main function for submitform endpoint
@@ -214,12 +249,12 @@ def submitForm(request): #main function for submitform endpoint
         #fetching the fields to be filled in document
         obj=docTable.objects.get(id=doc_id)
         lst=list(obj.doc_fields.keys())
-        # filling the values of fields in dict acc tu user_input
+        # filling the values of fields in dict acc to user_input
         for i in range(len(user_ip)):
             obj.doc_fields[lst[i]]=user_ip[i]
         filled_text=fillData(doc_id=doc_id,data=obj.doc_fields)#using llm to fill data
         pdf_file_path = os.path.join(filled_pdfs_path,f'filled_file_{doc_id}.pdf')
-        create_pdf(text=filled_text,filename=pdf_file_path)
+        align_text_to_pdf(text=filled_text,output_pdf=pdf_file_path)
         return JsonResponse({'message':pdf_file_path})
 
     except Exception as e:
