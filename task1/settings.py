@@ -124,7 +124,7 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 #api key
-COHERE_API_KEY='your_api_key'
+COHERE_API_KEY='60a9j2TmdvCcOcgqIj3OgBMR6EDBI36EJEBbF3SL'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
