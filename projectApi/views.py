@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.http.response import JsonResponse
 import re
 from django.conf import settings
-from .models import docTable,newPdfUpload
+from .models import docTable,formLabels
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextBox, LTTextLine, LAParams
 import os
@@ -13,8 +13,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import units
 from reportlab.lib.utils import simpleSplit
-import fpdf as FPDF
-
+from fpdf import FPDF
+import json
+from django.views.decorators.csrf import csrf_exempt
 
 # setting up llms secret key as os enviornment variable
 
@@ -61,6 +62,7 @@ def getResponse(text):
     response=llm(text)
     return response
 
+@csrf_exempt
 def processChat(request): # main function for chat endpoint
     '''
     output:
@@ -68,15 +70,18 @@ def processChat(request): # main function for chat endpoint
     '''
     try:
         if request.method == 'GET':
-            query=request.GET.get('message')
+            data=json.loads(request.body)
+            query=data.get('message')
         elif request.method == 'POST':
-            query=request.POST.get('message')
+            data=json.loads(request.body)
+            query=data.get('message')
         else: 
             return JsonResponse({'message' : []})
+        print(query)
         category=categorizeText(query)
         if category:
             lst=docTable.objects.all()
-            resp=[{'id':i.id,'path':i.doc_file.url} for i in lst]
+            resp=[{'id':i.id,'path':i.doc_file.path} for i in lst]
         else:
             resp=getResponse(text=query)
         return JsonResponse({'message':resp})
@@ -111,7 +116,7 @@ def extractFields(text):
     output format: [label1, label2.....]
     '''
     prompt_template="""
-    you are a text analyser and you are given a text which is an affidavit form and you have to find out all the fields that have spaces to be filled in that form in output give field names in comma seperated list
+    you are a text analyser and you are given a text which is an affidavit form and you have to find out all the fields that have spaces to be filled in that form in **output should have only field names seperated by ',' and should not have any extra messages from your side**
     {text_form}
     """
     llm=get_llm()
@@ -122,9 +127,10 @@ def extractFields(text):
     chain = LLMChain(llm=llm, prompt=prompt)
     text_form = text
     output = chain.run(text_form=text_form)
-    res=split_str(output)
+    res=output.split(',')
     return res
 
+@csrf_exempt
 def submitButton(request): # main function for submitbutton endpoint
     '''
     output format: JSON
@@ -132,25 +138,28 @@ def submitButton(request): # main function for submitbutton endpoint
     '''
     try:
         if request.method == 'GET':
-            doc_id=request.GET.get('doc_id')
+            data=json.loads(request.body)
+            doc_id=data.get('doc_id')
         elif request.method == 'POST':
-            doc_id=request.POST.get('doc_id')
+            data=json.loads(request.body)
+            doc_id=data.get('doc_id')
         else: 
             print('invalidRequestMethod')
             return JsonResponse({'doc_id':doc_id,'message' : []})
         temp=docTable.objects.get(id=doc_id)
-        if len(temp)==0:
+        if temp==None:
             #check if doc is present in the database
             return JsonResponse({'doc_id':doc_id,'message':'invaliDocumentId'})
         # checking if the document fields were fetched in past
-        if len(temp.doc_fields)==0:
-            data_info=extractData(file_path=temp.doc_file.url)
+        f=formLabels.objects.get(id=doc_id)
+        if len(f.doc_fields)==0:
+            data_info=extractData(file_path=temp.doc_file.path)
             field_info=extractFields(text=data_info)
             res={i:"" for i in field_info}
-            temp.doc_fields=res
-            temp.save() #saving fields for future use
+            f.doc_fields=res
+            f.save() #saving fields for future use
         else:
-            field_info=list(temp.doc_fields.keys())
+            field_info=list(f.doc_fields.keys())
         return JsonResponse({'doc_id':doc_id,'message':field_info})
     except Exception as e:
         print(e)
@@ -161,7 +170,8 @@ def submitButton(request): # main function for submitbutton endpoint
 def fillData(doc_id,data):
     llm=get_llm()
     obj=docTable.objects.get(id=doc_id)
-    text_form=extractData(obj.doc_file.url)
+    text_form=extractData(file_path=obj.doc_file.path)
+    text_form=text_form.replace('GENERAL AFFIDAVIT','')
     pp2 = """
     {user_input}
     Using the above information, carefully fill in all the fields of the form provided below. 
@@ -169,14 +179,21 @@ def fillData(doc_id,data):
     Do **not** change the alignment, spacing, or line breaks in the text. 
 
     Replace the placeholders with the appropriate information provided. 
-    Replace '(Insert Statement)' with the user's statement. Leave the signature and date sections intact.
+    Replace '(Insert Statement)' with the Statement in above information. Leave the signature and date sections intact.
 
     Here is the form template to fill:
 
     {text_form}
 
-    The filled form should be in the **same format** as above. The output should only contain the filled form with the **same line and paragraph breaks** as in the original.
+    The filled form should be in the **same format** as above. The output should only contain the filled form with the **same line and paragraph breaks**  as in the original.
+    **output should have only the filled form and should not have any extra messages**
 """
+    # pp2="""
+    # {user_input}
+    # use the above information to fill all the fields of form given below
+    # {text_form}
+    # please return the above text_form after filling all the spaces with the given information
+    # """
     prompt2=PromptTemplate(
         input_variables=['user_input','text_form'],
         template=pp2,
@@ -200,9 +217,10 @@ def align_text_to_pdf(text,output_pdf,line_length=80):
     pdf.set_font("Arial", "B", size=22)  # Bold font for heading
     pdf.cell(0, 20, "GENERAL AFFIDAVIT", ln=True, align="C")  # ln=True moves the cursor to next line after cell
     pdf.set_font("Arial", size=12)
-
+    pdf.ln(15)
     output_str = ""
     lines = text.split('\n')
+    # print(lines)
     line = ''
     # aligning text
     for i in lines:
@@ -238,27 +256,30 @@ def align_text_to_pdf(text,output_pdf,line_length=80):
     pdf.output(output_pdf)
     print(f"PDF saved as {output_pdf}")
 
-
+@csrf_exempt
 def submitForm(request): #main function for submitform endpoint
     try:
         if request.method == 'GET':
-            doc_id=request.GET.get('doc_id')
-            user_ip=request.GET.get('user_input')
+            data=json.loads(request.body)
+            doc_id=data.get('doc_id')
+            user_ip=data.get('user_input')
         elif request.method == 'POST':
-            doc_id=request.POST.get('doc_id')
-            user_ip=request.POST.get('user_input')
+            data=json.loads(request.body)
+            doc_id=data.get('doc_id')
+            user_ip=data.get('user_input')
         else: 
             return JsonResponse({'file':'','message' : 'invalidRequestMethod'})
         #fetching the fields to be filled in document
-        obj=docTable.objects.get(id=doc_id)
-        lst=list(obj.doc_fields.keys())
+        # obj=docTable.objects.get(id=doc_id)
+        f=formLabels.objects.get(id=doc_id)
+        lst=list(f.doc_fields.keys())
         # filling the values of fields in dict acc to user_input
         for i in range(len(user_ip)):
-            obj.doc_fields[lst[i]]=user_ip[i]
-        filled_text=fillData(doc_id=doc_id,data=obj.doc_fields)#using llm to fill data
+            f.doc_fields[lst[i]]=user_ip[i]
+        filled_text=fillData(doc_id=doc_id,data=f.doc_fields)#using llm to fill data
         pdf_file_path = os.path.join(filled_pdfs_path,f'filled_file_{doc_id}.pdf')
         align_text_to_pdf(text=filled_text,output_pdf=pdf_file_path)
-        return JsonResponse({'message':pdf_file_path})
+        return JsonResponse({'message':str(pdf_file_path)})
 
     except Exception as e:
         return JsonResponse({'message':e})
