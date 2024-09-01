@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import docTable,newPdfUpload
+from .models import docTable,formLabels
 
 admin.site.register(docTable)
-admin.site.register(newPdfUpload)
+admin.site.register(formLabels)
